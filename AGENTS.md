@@ -33,3 +33,8 @@
 - **Problem:** `TypeError: float() argument must be a string or a real number, not 'Expr'` or issues with `pytest.approx`.
 - **Cause:** `pl.corr()` and other Polars functions return an `Expr`, not a scalar, when called directly.
 - **Solution:** Wrap in `pl.select(...).item()` to extract the scalar value for use in pure Python/Tests.
+
+### [Solved] Polars DataFrame Comparison
+- **Problem:** `AttributeError: 'DataFrame' object has no attribute 'frame_equal'`.
+- **Cause:** Newer Polars versions use `df.equals(other)` for boolean comparison.
+- **Solution:** Use `df.equals(other)` for simple assertions, or `pl.testing.assert_frame_equal(df, other)` for detailed test failures.
