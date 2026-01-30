@@ -32,3 +32,11 @@ venv/
 data/*.csv
 data/*.xlsx
 data/*.parquet
+
+# Logs and Build Artifacts
+*.log
+parallax.log
+build_*.log
+build_release.py
+# Legacy Virtual Envs
+.venv_*/
