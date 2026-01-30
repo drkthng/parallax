@@ -1,3 +1,11 @@
+import os
+import sys
+
+# Ensure project root is in sys.path for both local execution and Flet build
+root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if root_path not in sys.path:
+    sys.path.insert(0, root_path)
+
 import flet as ft
 from src.ui.layout import ParallaxLayout
 from src.data.loader import MockLoader

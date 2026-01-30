@@ -15,16 +15,29 @@ The difference between these two views is **Tracking Error** (Drift).
 **Parallax** is a desktop tool built to measure, visualize, and minimize this displacement. It allows traders to construct synthetic proxies for assets they cannot trade directly, optimizing the weighting of available equities to create a "perfect" mirror of the target.
 
 ### The Stack (2026 Edition)
-We prioritize local performance, GPU acceleration, and strict typing.
+We prioritize local performance, strict typing, and browser-based reactivity.
 
-*   **GUI:** [Flet](https://flet.dev) (Flutter for Python) - 60FPS, GPU-accelerated, compiled to native Windows executable.
+*   **GUI:** [Solara](https://solara.dev) - React-based Python web framework.
 *   **Data Engine:** [Polars](https://pola.rs) - Rust-based DataFrame library. Replaces Pandas for speed and strict schema enforcement.
 *   **Math:** `scipy.optimize` (SLSQP/Minimize) for solving weight allocations.
-*   **Visualization:** Plotly (via Flet) for interactive drift analysis.
+*   **Environment:** Windows (Native Executable via Browser App Mode).
 
 ### Architecture
 *   `src/core`: Pure logic and math. 100% covered by `pytest`.
 *   `src/data`: Interface adapters for Norgate Data and CSV ingestion.
-*   `src/ui`: Declarative Flet components.
+*   `src/app.py`: Main Solara application entry point.
 
----
+### Usage
+
+**1. One-Time Setup**
+Initialize the environment and install dependencies.
+```powershell
+.\setup.bat
+```
+
+**2. Launch Application**
+Start the Solara server and open the application window.
+```powershell
+.\run_parallax.bat
+```
+*Note: The launcher minimizes the server console to the system tray and ensures a single browser window opens.*

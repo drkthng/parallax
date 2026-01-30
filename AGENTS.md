@@ -38,3 +38,41 @@
 - **Problem:** `AttributeError: 'DataFrame' object has no attribute 'frame_equal'`.
 - **Cause:** Newer Polars versions use `df.equals(other)` for boolean comparison.
 - **Solution:** Use `df.equals(other)` for simple assertions, or `pl.testing.assert_frame_equal(df, other)` for detailed test failures.
+
+### [Solved] Artifact Creation Tooling
+- **Problem:** `write_to_file` failed with "artifact metadata is required when IsArtifact is true".
+- **Cause:** Setting `IsArtifact: true` requires `ArtifactMetadata` object with `ArtifactType` and `Summary`.
+- **Solution:** Always provide `ArtifactMetadata` when creating or updating artifacts via `write_to_file`.
+
+### [Solved] Flet UserControl AttributeError
+- **Problem:** `AttributeError: module 'flet' has no attribute 'UserControl'`.
+- **Cause:** Flet v0.21+ deprecated `UserControl`.
+- **Solution:** Inherit directly from `ft.Column`, `ft.Row`, or `ft.Container` and define controls in `__init__`.
+
+### [Solved] ModuleNotFoundError on Execution
+- **Problem:** Running `src\main.py` directly caused `ModuleNotFoundError: No module named 'src'`.
+- **Cause:** Python script execution context and package structure.
+- **Solution:** Created `__init__.py` files and added `sys.path` logic in `main.py`. Execute as module: `python -m src.main`.
+
+## 4. Tech Stack Pivot: Flet to Solara (Jan 2026)
+
+### [Solved] Solara Startup: Timeout & Zombie Processes
+- **Problem:** `python -m solara` sometimes hangs or fails to bind quickly, causing timeouts. Old processes lock port 8501.
+- **Solution:** 
+    1. **Auto-Kill:** `run_parallax.bat` automatically kills any process on port 8501 using `stop_parallax.bat`.
+    2. **PowerShell Check:** Replaced flaky `netstat` checks with `New-Object Net.Sockets.TcpClient` for robust port detection.
+    3. **Windowless:** Run via `start /MIN cmd` to keep logs reliable while hiding the console.
+
+### THE ASSETS (KEEP THESE)
+- **Logic:** `src/core/stats.py` is perfect. The Polars math and `CorrelationEngine` are stack-agnostic. DO NOT REWRITE.
+- **Data:** `src/data/loader.py` and the `MockLoader` protocol are perfect. Keep the interfaces as they are.
+- **Tests:** All `pytest` files for core and data layers remain valid.
+
+### THE CHANGES (REPLACE THESE)
+- **UI Framework:** We are moving from Flet to **Solara**.
+- **Execution Model:** Instead of a native EXE build, we use a "Local Browser App" model.
+- **State Management:** Use Solara's reactive variables (`solara.reactive()`) instead of Flet's page state.
+
+### REUSE PROTOCOL
+- When building the new UI, import the existing `CorrelationEngine` and `MockLoader`. 
+- Focus only on the **Solara Component Tree**.

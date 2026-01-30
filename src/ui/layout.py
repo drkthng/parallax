@@ -1,9 +1,11 @@
 import flet as ft
 
-class ParallaxLayout(ft.UserControl):
+class ParallaxLayout(ft.Column):
     def __init__(self, on_calculate: callable):
         super().__init__()
         self.on_calculate = on_calculate
+        self.spacing = 20
+        self.scroll = ft.ScrollMode.ADAPTIVE
         
         # UI Components
         self.asset_a = ft.Dropdown(
@@ -47,24 +49,19 @@ class ParallaxLayout(ft.UserControl):
             )
         )
 
-    def build(self):
-        return ft.Column(
-            controls=[
-                ft.Text("Parallax Drift Analyzer", size=32, weight=ft.FontWeight.BOLD),
-                ft.Row(
-                    controls=[
-                        self.asset_a,
-                        self.asset_b,
-                    ],
-                    alignment=ft.MainAxisAlignment.START
-                ),
-                self.calc_button,
-                ft.Divider(),
-                self.result_card
-            ],
-            spacing=20,
-            scroll=ft.ScrollMode.ADAPTIVE
-        )
+        self.controls = [
+            ft.Text("Parallax Drift Analyzer", size=32, weight=ft.FontWeight.BOLD),
+            ft.Row(
+                controls=[
+                    self.asset_a,
+                    self.asset_b,
+                ],
+                alignment=ft.MainAxisAlignment.START
+            ),
+            self.calc_button,
+            ft.Divider(),
+            self.result_card
+        ]
 
     def update_result(self, correlation: float):
         self.result_text.value = f"Correlation: {correlation:.4f}"
