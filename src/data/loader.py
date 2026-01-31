@@ -35,7 +35,9 @@ class MockLoader(MarketDataLoader):
         seed_val = abs(hash(symbol)) % (2**32 - 1)
         rng = np.random.default_rng(seed_val)
         
-        start_date = datetime(2023, 1, 1)
+        # Realism: Data ends NOW.
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=n_days)
         dates = [start_date + timedelta(days=i) for i in range(n_days)]
         
         # Random walk: starting at 100, daily returns ~ N(0, 0.015)

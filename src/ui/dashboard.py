@@ -50,7 +50,10 @@ def calculate_analytics():
         # 3. Volatility (Annualized)
         vol_a = CorrelationEngine.calculate_volatility(combined["ret_a"])
         vol_b = CorrelationEngine.calculate_volatility(combined["ret_b"])
-        vol_spread = vol_b - vol_a # Positive means Proxy is more volatile
+        vol_spread = vol_b - vol_a 
+        
+        # 4. Tracking Error
+        te = CorrelationEngine.calculate_tracking_error(combined["ret_a"], combined["ret_b"])
         
         # Pack results
         results = {
@@ -58,6 +61,7 @@ def calculate_analytics():
             "vol_a": vol_a,
             "vol_b": vol_b,
             "vol_spread": vol_spread,
+            "tracking_error": te,
             "data": combined
         }
         calculation_result.set(results)
@@ -71,103 +75,107 @@ def calculate_analytics():
 @solara.component
 def Dashboard():
     
-    with solara.Column(style={"padding": "24px", "height": "100%"}):
+    # Use full height for easier layout management
+    with solara.Column(style={"padding": "24px", "height": "100vh"}):
         
         # --- Header ---
         solara.Markdown("# 🔭 Drift Analysis")
         
-        # --- Controls ---
-        with solara.Card():
-            with solara.Column(gap="15px"):
-                # Asset Selection Row
-                with solara.Row(gap="20px", style={"align-items": "center"}):
-                    solara.Select(
-                        label="Target (Underlying)", 
-                        values=["Index", "BTC", "SPY", "NDX", "GLD"], 
-                        value=asset_a
-                    )
-                    solara.Select(
-                        label="Proxy Portfolio", 
-                        values=["Proxy", "ETH", "MSTR", "COIN", "QQQ"], 
-                        value=asset_b
-                    )
-                    solara.Button(
-                        "Analyze Drift", 
-                        on_click=calculate_analytics,
-                        color="primary",
-                        icon_name="mdi-chart-line",
-                        loading=is_loading.value
-                    )
-                
-                # Settings Row
-                solara.Text("Lookback Window (Days):", style={"font-weight": "bold", "font-size": "0.9em"})
-                solara.SliderInt(
-                    label="",
-                    value=lookback_window,
-                    min=30,
-                    max=365,
-                    thumb_label=True
-                )
-
-        # --- Results ---
-        if calculation_result.value:
-            res = calculation_result.value
+        # --- Main Layout (Grid) ---
+        # Flex Row: Left (Controls/Metrics) | Right (Chart)
+        with solara.Row(style={"height": "100%", "gap": "24px", "align-items": "start"}):
             
-            if "error" in res:
-                solara.Error(res["error"])
-            else:
-                data = res["data"]
-                corr = res["correlation"]
-                vol_spread = res["vol_spread"]
-                vol_a = res["vol_a"]
-                vol_b = res["vol_b"]
+            # --- LEFT COLUMN: Controls & Metrics ---
+            with solara.Column(style={"width": "350px", "min-width": "300px", "flex-shrink": "0"}):
                 
-                # Metrics Row
-                with solara.Row(gap="20px", style={"margin-top": "20px"}):
+                # Controls Card
+                with solara.Card("Configuration"):
+                    with solara.Column(gap="15px"):
+                        solara.Select(
+                            label="Target (Underlying)", 
+                            values=["Index", "BTC", "SPY", "NDX", "GLD"], 
+                            value=asset_a
+                        )
+                        solara.Select(
+                            label="Proxy Portfolio", 
+                            values=["Proxy", "ETH", "MSTR", "COIN", "QQQ"], 
+                            value=asset_b
+                        )
+                        
+                        solara.Text("Lookback Window:", style={"font-weight": "bold", "font-size": "0.9em", "margin-top": "10px"})
+                        solara.SliderInt(
+                            label="",
+                            value=lookback_window,
+                            min=30,
+                            max=365,
+                            thumb_label=True
+                        )
+                        
+                        solara.Button(
+                            "Analyze Drift", 
+                            on_click=calculate_analytics,
+                            color="primary",
+                            icon_name="mdi-chart-line",
+                            loading=is_loading.value,
+                            style={"width": "100%", "margin-top": "10px"}
+                        )
+
+                # Metrics (If Ready)
+                if calculation_result.value:
+                    res = calculation_result.value
+                    if "error" in res:
+                        solara.Error(res["error"])
+                    else:
+                        corr = res["correlation"]
+                        vol_spread = res["vol_spread"]
+                        te = res["tracking_error"]
+                        
+                        # Stacked Cards for Vertical Layout
+                        with solara.Column(gap="15px", style={"margin-top": "20px"}):
+                            
+                            # Correlation
+                            with solara.Card("Correlation"):
+                                color = "green" if corr > 0.8 else "orange" if corr > 0.5 else "red"
+                                solara.Text(f"{corr:.4f}", style={"font-size": "26px", "font-weight": "bold", "color": color})
+                            
+                            # Tracking Error (New)
+                            with solara.Card("Tracking Error (Ann.)"):
+                                # Lower is better. <5% Great, >15% Poor?
+                                te_color = "green" if te < 0.10 else "orange" if te < 0.20 else "red"
+                                solara.Text(f"{te:.2%}", style={"font-size": "26px", "font-weight": "bold", "color": te_color})
+
+                            # Volatility Spread
+                            with solara.Card("Vol. Spread"):
+                                spread_color = "red" if vol_spread > 0.05 else "green" if vol_spread < 0.02 else "orange"
+                                prefix = "+" if vol_spread > 0 else ""
+                                solara.Text(f"{prefix}{vol_spread:.2%}", style={"font-size": "26px", "font-weight": "bold", "color": spread_color})    
+
+            # --- RIGHT COLUMN: Chart ---
+            with solara.Column(style={"flex": "1", "min-width": "0", "height": "100%"}):
+                if calculation_result.value and "error" not in calculation_result.value:
+                    res = calculation_result.value
+                    data = res["data"]
                     
-                    # Correlation Card
-                    with solara.Card("Correlation"):
-                        color = "green" if corr > 0.8 else "orange" if corr > 0.5 else "red"
-                        solara.Text(f"{corr:.4f}", style={"font-size": "28px", "font-weight": "bold", "color": color})
-                        solara.Text("Pearson Coeff (Returns)", style={"font-size": "0.8em", "opacity": "0.7"})
-
-                    # Volatility Spread Card
-                    with solara.Card("Volatility Spread"):
-                        # If spread is positive, Proxy is more volatile (Riskier)
-                        spread_color = "red" if vol_spread > 0.05 else "green" if vol_spread < 0.02 else "orange"
-                        prefix = "+" if vol_spread > 0 else ""
-                        solara.Text(f"{prefix}{vol_spread:.2%}", style={"font-size": "28px", "font-weight": "bold", "color": spread_color})
-                        solara.Text(f"Target: {vol_a:.1%} | Proxy: {vol_b:.1%}", style={"font-size": "0.8em", "opacity": "0.7"})
-
-                # Chart
-                # Use plotly.graph_objects to avoid ANY dependency on pandas (Plotly Express requires pandas)
-                import plotly.graph_objects as go
-                
-                fig = go.Figure()
-                
-                # Trace for Asset A
-                fig.add_trace(go.Scatter(
-                    x=data["date"].to_list(),
-                    y=data["Asset A"].to_list(),
-                    mode='lines',
-                    name=asset_a.value
-                ))
-                
-                # Trace for Asset B
-                fig.add_trace(go.Scatter(
-                    x=data["date"].to_list(),
-                    y=data["Asset B"].to_list(),
-                    mode='lines',
-                    name=asset_b.value
-                ))
-                
-                fig.update_layout(
-                    title=f"Price History: {asset_a.value} vs {asset_b.value}",
-                    template="plotly_dark",
-                    height=500,
-                    xaxis_title="Date",
-                    yaxis_title="Price"
-                )
-                
-                with solara.Card("Price Action", style={"margin-top": "20px"}):
-                    solara.FigurePlotly(fig)
+                    # Chart
+                    import plotly.graph_objects as go
+                    
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=data["date"].to_list(), y=data["Asset A"].to_list(), mode='lines', name=asset_a.value))
+                    fig.add_trace(go.Scatter(x=data["date"].to_list(), y=data["Asset B"].to_list(), mode='lines', name=asset_b.value))
+                    
+                    fig.update_layout(
+                        title=f"{asset_a.value} vs {asset_b.value} (Last {lookback_window.value} Days)",
+                        template="plotly_dark",
+                        height=600, # Taller chart
+                        xaxis_title="Date",
+                        yaxis_title="Price (Rebased to 100)",
+                        margin=dict(l=40, r=40, t=60, b=40)
+                    )
+                    
+                    with solara.Card(style={"height": "100%"}):
+                        solara.FigurePlotly(fig)
+                else:
+                    # Placeholder or Empty State
+                    if not calculation_result.value:
+                         with solara.Card(style={"height": "400px", "display": "flex", "align-items": "center", "justify-content": "center"}):
+                            solara.Text("Select assets and click 'Analyze Drift' to see the chart.", style={"opacity": "0.5"})

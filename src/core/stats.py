@@ -24,3 +24,14 @@ class CorrelationEngine:
         # ddof=1 for sample standard deviation
         daily_std = series.std(ddof=1)
         return float(daily_std * np.sqrt(periods))
+
+    @staticmethod
+    def calculate_tracking_error(s1_ret: pl.Series, s2_ret: pl.Series, periods: int = 252) -> float:
+        """
+        Calculates the annualized Tracking Error (volatility of return differences).
+        TE = Stdev(Rp - Rb) * sqrt(T)
+        """
+        diff = s2_ret - s1_ret 
+        # Note: Direction doesn't matter for Stdev, but conceptually (Proxy - Target)
+        te = diff.std(ddof=1) * np.sqrt(periods)
+        return float(te)
