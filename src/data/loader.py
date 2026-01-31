@@ -35,8 +35,8 @@ class MockLoader(MarketDataLoader):
         seed_val = abs(hash(symbol)) % (2**32 - 1)
         rng = np.random.default_rng(seed_val)
         
-        # Realism: Data ends NOW.
-        end_date = datetime.now()
+        # Realism: Data ends TODAY at midnight to ensure alignment across multiple calls
+        end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         start_date = end_date - timedelta(days=n_days)
         dates = [start_date + timedelta(days=i) for i in range(n_days)]
         

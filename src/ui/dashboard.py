@@ -8,7 +8,7 @@ from src.core.stats import CorrelationEngine
 
 # --- State ---
 asset_a = solara.reactive("Index")
-asset_b = solara.reactive("Proxy")
+proxy_assets = solara.reactive(["MSTR"]) 
 lookback_window = solara.reactive(100)
 calculation_result = solara.reactive(None)
 is_loading = solara.reactive(False)
@@ -18,42 +18,79 @@ def calculate_analytics():
     is_loading.set(True)
     try:
         loader = MockLoader()
-        
-        # Load Data with dynamic window
         n = lookback_window.value
-        df_a = loader.load_price_history(asset_a.value, n_days=n)
-        df_b = loader.load_price_history(asset_b.value, n_days=n)
         
-        # Join on Date
-        df_a = df_a.rename({"close": "close_a"})
-        df_b = df_b.rename({"close": "close_b"})
+        # 1. Load TARGET Data
+        df_target = loader.load_price_history(asset_a.value, n_days=n)
+        df_target = df_target.rename({"close": "close_target"})
         
-        combined = pl.DataFrame({
-            "date": df_a["date"],
-            "Asset A": df_a["close_a"],
-            "Asset B": df_b["close_b"]
-        })
+        # 2. Load PROXY Data (Multi-Asset)
+        if not proxy_assets.value:
+            raise ValueError("Please select at least one asset for the Proxy Portfolio.")
+            
+        proxy_dfs = []
+        for asset in proxy_assets.value:
+            df = loader.load_price_history(asset, n_days=n)
+            # Rename close col to avoid collision (e.g. "close_MSTR")
+            df = df.rename({"close": f"close_{asset}"})
+            proxy_dfs.append(df)
+        
+        # 3. Join All Data
+        # Base is target df
+        combined = df_target
+        
+        # Join all proxy assets on 'date'
+        # Since MockLoader uses same dates, we can assume alignment, but let's be safe(ish) using join
+        for df in proxy_dfs:
+            combined = combined.join(df, on="date", how="inner")
+            
+        # 4. Calculate Returns for ALL columns
+        # Filter explicitly for price columns
+        price_cols = [c for c in combined.columns if c.startswith("close_")]
+        
+        # Calculate percent change for all price columns
+        # resulting cols: "ret_target", "ret_MSTR", "ret_COIN", etc.
+        combined = combined.with_columns([
+            pl.col(c).pct_change().alias(c.replace("close_", "ret_")) 
+            for c in price_cols
+        ]).drop_nulls()
+        
+        # 5. Synthesize Proxy Return (Equal Weight)
+        # Avg(Returns of all selected proxy assets)
+        proxy_ret_cols = [f"ret_{a}" for a in proxy_assets.value]
+        
+        # Sum horizontal / Count
+        combined = combined.with_columns(
+            (pl.sum_horizontal(proxy_ret_cols) / len(proxy_ret_cols)).alias("ret_proxy_synthetic")
+        )
+        
+        # 6. Reconstruct Proxy Price (Base 100)
+        # P_t = P_t-1 * (1 + R_t)
+        # Using cumprod: 100 * Product(1 + R)
+        # We need to add 1 to returns, then cumprod
+        combined = combined.with_columns(
+             (100 * (1 + pl.col("ret_proxy_synthetic")).cum_prod()).alias("close_proxy_synthetic")
+        )
+
+        # Also rebase Target to 100 for fair comparison on chart
+        combined = combined.with_columns(
+             (100 * (1 + pl.col("ret_target")).cum_prod()).alias("close_target_rebased")
+        )
 
         # --- Statistics Engine ---
-        # 1. Calculate Returns (Drop nulls from first row)
-        combined = combined.with_columns([
-            pl.col("Asset A").pct_change().alias("ret_a"),
-            pl.col("Asset B").pct_change().alias("ret_b")
-        ]).drop_nulls()
-
-        # 2. Correlation (on Returns)
+        # 2. Correlation
         corr = CorrelationEngine.calculate_correlation(
-            combined["ret_a"], 
-            combined["ret_b"]
+            combined["ret_target"], 
+            combined["ret_proxy_synthetic"]
         )
 
         # 3. Volatility (Annualized)
-        vol_a = CorrelationEngine.calculate_volatility(combined["ret_a"])
-        vol_b = CorrelationEngine.calculate_volatility(combined["ret_b"])
+        vol_a = CorrelationEngine.calculate_volatility(combined["ret_target"])
+        vol_b = CorrelationEngine.calculate_volatility(combined["ret_proxy_synthetic"])
         vol_spread = vol_b - vol_a 
         
         # 4. Tracking Error
-        te = CorrelationEngine.calculate_tracking_error(combined["ret_a"], combined["ret_b"])
+        te = CorrelationEngine.calculate_tracking_error(combined["ret_target"], combined["ret_proxy_synthetic"])
         
         # Pack results
         results = {
@@ -96,10 +133,11 @@ def Dashboard():
                             values=["Index", "BTC", "SPY", "NDX", "GLD"], 
                             value=asset_a
                         )
-                        solara.Select(
-                            label="Proxy Portfolio", 
-                            values=["Proxy", "ETH", "MSTR", "COIN", "QQQ"], 
-                            value=asset_b
+                        
+                        solara.SelectMultiple(
+                            label="Proxy Portfolio (Assets)", 
+                            all_values=["MSTR", "COIN", "MARA", "RIOT", "ETH", "QQQ"], 
+                            values=proxy_assets
                         )
                         
                         solara.Text("Lookback Window:", style={"font-weight": "bold", "font-size": "0.9em", "margin-top": "10px"})
@@ -138,9 +176,9 @@ def Dashboard():
                                 color = "green" if corr > 0.8 else "orange" if corr > 0.5 else "red"
                                 solara.Text(f"{corr:.4f}", style={"font-size": "26px", "font-weight": "bold", "color": color})
                             
-                            # Tracking Error (New)
+                            # Tracking Error
                             with solara.Card("Tracking Error (Ann.)"):
-                                # Lower is better. <5% Great, >15% Poor?
+                                # Lower is better.
                                 te_color = "green" if te < 0.10 else "orange" if te < 0.20 else "red"
                                 solara.Text(f"{te:.2%}", style={"font-size": "26px", "font-weight": "bold", "color": te_color})
 
@@ -160,16 +198,34 @@ def Dashboard():
                     import plotly.graph_objects as go
                     
                     fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=data["date"].to_list(), y=data["Asset A"].to_list(), mode='lines', name=asset_a.value))
-                    fig.add_trace(go.Scatter(x=data["date"].to_list(), y=data["Asset B"].to_list(), mode='lines', name=asset_b.value))
+                    
+                    # 1. Target Line
+                    fig.add_trace(go.Scatter(
+                        x=data["date"].to_list(),
+                        y=data["close_target_rebased"].to_list(),
+                        mode='lines',
+                        name=f"{asset_a.value} (Target)",
+                        line=dict(color='white', width=2)
+                    ))
+                    
+                    # 2. Proxy Line (Synthetic)
+                    proxy_name = f"Proxy ({', '.join(proxy_assets.value[:2])}{'...' if len(proxy_assets.value)>2 else ''})"
+                    fig.add_trace(go.Scatter(
+                        x=data["date"].to_list(),
+                        y=data["close_proxy_synthetic"].to_list(),
+                        mode='lines',
+                        name=proxy_name,
+                        line=dict(color='#00d1b2', width=2, dash='solid') # Cyan for proxy
+                    ))
                     
                     fig.update_layout(
-                        title=f"{asset_a.value} vs {asset_b.value} (Last {lookback_window.value} Days)",
+                        title=f"Performance: {asset_a.value} vs Synthetic Proxy",
                         template="plotly_dark",
-                        height=600, # Taller chart
+                        height=600, 
                         xaxis_title="Date",
                         yaxis_title="Price (Rebased to 100)",
-                        margin=dict(l=40, r=40, t=60, b=40)
+                        margin=dict(l=40, r=40, t=60, b=40),
+                        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
                     )
                     
                     with solara.Card(style={"height": "100%"}):
@@ -178,4 +234,4 @@ def Dashboard():
                     # Placeholder or Empty State
                     if not calculation_result.value:
                          with solara.Card(style={"height": "400px", "display": "flex", "align-items": "center", "justify-content": "center"}):
-                            solara.Text("Select assets and click 'Analyze Drift' to see the chart.", style={"opacity": "0.5"})
+                            solara.Text("Construct a portfolio and click 'Analyze Drift'.", style={"opacity": "0.5"})

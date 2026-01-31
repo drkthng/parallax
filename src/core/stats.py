@@ -23,6 +23,8 @@ class CorrelationEngine:
         """
         # ddof=1 for sample standard deviation
         daily_std = series.std(ddof=1)
+        if daily_std is None:
+            return 0.0
         return float(daily_std * np.sqrt(periods))
 
     @staticmethod
@@ -33,5 +35,7 @@ class CorrelationEngine:
         """
         diff = s2_ret - s1_ret 
         # Note: Direction doesn't matter for Stdev, but conceptually (Proxy - Target)
-        te = diff.std(ddof=1) * np.sqrt(periods)
-        return float(te)
+        te = diff.std(ddof=1)
+        if te is None:
+            return 0.0
+        return float(te * np.sqrt(periods))
