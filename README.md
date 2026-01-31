@@ -22,6 +22,12 @@ We prioritize local performance, strict typing, and browser-based reactivity.
 *   **Math:** `scipy.optimize` (SLSQP/Minimize) for solving weight allocations.
 *   **Environment:** Windows (Native Executable via Browser App Mode).
 
+### Features (v2.1)
+*   **Drift Dashboard:** Interactive Plotly charts comparing Target vs Proxy assets.
+*   **Advanced Analytics:** Real-time correlation, volatility spread, and tracking error metrics.
+*   **Dynamic Timeframes:** Adjustable lookback window (30-365 days) with real-time data generation.
+*   **Responsive Design:** Optimized grid layout for desktop usage.
+
 ### Architecture
 *   `src/core`: Pure logic and math. 100% covered by `pytest`.
 *   `src/data`: Interface adapters for Norgate Data and CSV ingestion.

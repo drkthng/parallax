@@ -76,3 +76,13 @@
 ### REUSE PROTOCOL
 - When building the new UI, import the existing `CorrelationEngine` and `MockLoader`. 
 - Focus only on the **Solara Component Tree**.
+
+### [Solved] Plotly Express vs. Polars (No Pandas Rule)
+- **Problem:** `plotly.express` functions require `pandas` or `pyarrow` even when passing dictionaries.
+- **Cause:** Express has hard dependencies for internal data frame handling.
+- **Solution:** Use **`plotly.graph_objects`** (`go.Scatter`, etc.) with `polars.Series.to_list()`. It is dependency-free and adheres to the "No Pandas" rule.
+
+### [Solved] PowerShell Command Chaining
+- **Problem:** `git add . & git commit` fails in PowerShell.
+- **Cause:** `&` is a Call Operator in PowerShell, not a command separator like in Bash (`&&` or `;`).
+- **Solution:** Execute commands sequentially as separate tool calls, or use `;` if absolutely necessary (but separate calls are safer).
