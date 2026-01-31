@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 class MarketDataLoader(Protocol):
     """Abstract base class for loading market data."""
-    def load_price_history(self, symbol: str) -> pl.DataFrame:
+    def load_price_history(self, symbol: str, n_days: int = 100) -> pl.DataFrame:
         """
         Loads the price history for a given symbol.
         
@@ -19,23 +19,28 @@ class MarketDataLoader(Protocol):
 
 class MockLoader(MarketDataLoader):
     """Generates synthetic random walk data for testing."""
-    def load_price_history(self, symbol: str) -> pl.DataFrame:
+    def load_price_history(self, symbol: str, n_days: int = 100) -> pl.DataFrame:
         """
-        Generates 100 days of random walk data.
+        Generates random walk data for a specified number of days.
         
         Args:
             symbol (str): Ticker symbol.
+            n_days (int): Number of days to generate.
             
         Returns:
             pl.DataFrame: Synthetic price data.
         """
-        np.random.seed(42)  # Deterministic for testing
-        n_days = 100
+        # Use symbol-dependent seed for deterministic but diverse data
+        # Hash might vary per session, so we use a stable hash if needed, but hash() is fine for mock
+        seed_val = abs(hash(symbol)) % (2**32 - 1)
+        rng = np.random.default_rng(seed_val)
+        
         start_date = datetime(2023, 1, 1)
         dates = [start_date + timedelta(days=i) for i in range(n_days)]
         
-        # Random walk: starting at 100, daily returns ~ N(0, 0.01)
-        returns = np.random.normal(0, 0.01, n_days)
+        # Random walk: starting at 100, daily returns ~ N(0, 0.015)
+        # Increase volatility slightly for more interesting plots
+        returns = rng.normal(0, 0.015, n_days)
         prices = 100 * np.exp(np.cumsum(returns))
         
         df = pl.DataFrame({
