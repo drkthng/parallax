@@ -156,6 +156,7 @@ def calculate_analytics():
         vol_spread = vol_b - vol_a 
         
         te = CorrelationEngine.calculate_tracking_error(combined["ret_target"], combined["ret_proxy_synthetic"])
+        te_period = CorrelationEngine.calculate_period_tracking_error(combined["ret_target"], combined["ret_proxy_synthetic"])
         
         results = {
             "correlation": corr,
@@ -163,6 +164,7 @@ def calculate_analytics():
             "vol_b": vol_b,
             "vol_spread": vol_spread,
             "tracking_error": te,
+            "period_tracking_error": te_period,
             "data": combined,
             "weights": final_weights,
             "cash_weight": cash_weight,
@@ -409,6 +411,10 @@ def Dashboard():
                                 with solara.Card("Tracking Error (Ann.)"):
                                     te_color = "green" if te < 0.10 else "orange" if te < 0.20 else "red"
                                     solara.Text(f"{te:.2%}", style={"font-size": "26px", "font-weight": "bold", "color": te_color})
+
+                                with solara.Card("Tracking Error (Period)"):
+                                    te_p = res["period_tracking_error"]
+                                    solara.Text(f"{te_p:.2%}", style={"font-size": "26px", "font-weight": "bold", "color": "#00d1b2"})
 
                                 with solara.Card("Vol. Spread"):
                                     spread_color = "red" if vol_spread > 0.05 else "green" if vol_spread < 0.02 else "orange"

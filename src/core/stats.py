@@ -39,3 +39,12 @@ class CorrelationEngine:
         if te is None:
             return 0.0
         return float(te * np.sqrt(periods))
+
+    @staticmethod
+    def calculate_period_tracking_error(s1_ret: pl.Series, s2_ret: pl.Series) -> float:
+        """
+        Calculates the Tracking Error over the specific period of the input series.
+        TE_period = Stdev(Rp - Rb) * sqrt(N_samples)
+        This represents the expected deviation over the realized timeframe.
+        """
+        return CorrelationEngine.calculate_tracking_error(s1_ret, s2_ret, periods=len(s1_ret))
