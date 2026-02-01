@@ -14,6 +14,7 @@ set VENV_DIR=.venv
 set SOLARA_PORT=8501
 set LOG_FILE=parallax.log
 set MAX_RETRIES=30
+set SOLARA_THEME_SHOW_BANNER=False
 
 REM --- Check for Environment ---
 if not exist "%VENV_DIR%\Scripts\activate.bat" (

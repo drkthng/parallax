@@ -177,6 +177,40 @@ def calculate_analytics():
     finally:
         is_loading.set(False)
 
+def render_stats_table(res):
+    corr = res["correlation"]
+    vol_spread = res["vol_spread"]
+    te = res["tracking_error"]
+    te_p = res["period_tracking_error"]
+    
+    with solara.Card("Analytics"):
+        with solara.Column(gap="0px"):
+            # Header
+            with solara.Row(style={"border-bottom": "1px solid #444", "padding-bottom": "5px", "margin-bottom": "5px"}):
+                solara.Text("Metric", style={"font-weight": "bold", "flex": "1", "font-size": "0.9em"})
+                solara.Text("Value", style={"font-weight": "bold", "flex": "1", "text-align": "right", "font-size": "0.9em"})
+            
+            def StatRow(label, value, color=None):
+                with solara.Row(style={"padding": "3px 0", "align-items": "center"}):
+                    solara.Text(label, style={"flex": "1", "font-size": "0.9em", "color": "#ccc"})
+                    solara.Text(value, style={"flex": "1", "text-align": "right", "font-weight": "bold", "font-family": "monospace", "color": color or "white"})
+
+            # Correlation
+            c_color = "#4caf50" if corr > 0.8 else "#ff9800" if corr > 0.5 else "#f44336"
+            StatRow("Correlation", f"{corr:.4f}", c_color)
+            
+            # Tracking Error (Annual)
+            te_color = "#4caf50" if te < 0.10 else "#ff9800" if te < 0.20 else "#f44336"
+            StatRow("Tracking Error (Ann.)", f"{te:.2%}", te_color)
+
+            # Tracking Error (Period)
+            StatRow("Tracking Error (Period)", f"{te_p:.2%}", "#00bcd4")
+
+            # Vol Spread
+            vs_color = "#f44336" if vol_spread > 0.05 else "#4caf50" if vol_spread < 0.02 else "#ff9800"
+            prefix = "+" if vol_spread > 0 else ""
+            StatRow("Vol. Spread", f"{prefix}{vol_spread:.2%}", vs_color)
+
 
 @solara.component
 def Dashboard():
@@ -193,11 +227,12 @@ def Dashboard():
         with solara.Column(style={"padding": "40px", "max-width": "800px", "margin": "0 auto"}):
             with solara.Card("Global Settings"):
                 with solara.Column(gap="20px"):
-                    solara.Text("Data Source configuration is global.", style={"font-style": "italic"})
+                    solara.Text("Data Source configuration is global.", style={"font-style": "italic", "font-size": "0.8em"})
                     solara.Select(
                         label="Data Source",
                         values=["Mock", "Norgate", "CSV", "Yahoo"],
-                        value=data_source
+                        value=data_source,
+                        dense=True
                     )
                     
                     # Data Source Routing
@@ -278,39 +313,43 @@ def Dashboard():
                 with solara.Column(style={"width": "350px", "min-width": "300px", "flex-shrink": "0"}):
                     
                     # Controls Card
-                    with solara.Card("Configuration"):
-                        with solara.Column(gap="15px"):
-                            # Target Selection with Custom Entry
+                    with solara.Card("Configuration", style={"padding": "10px"}):
+                        with solara.Column(gap="10px"):
+                            # Target Selection
                             solara.Select(
                                 label="Target (Underlying)", 
                                 values=available_targets, 
-                                value=asset_a
+                                value=asset_a,
+                                dense=True
                             )
                             
                             # Custom Target Entry
                             # custom_target hook moved to top level
-                            with solara.Row(style={"align-items": "center", "margin-top": "-10px"}):
+                            with solara.Row(style={"align-items": "center", "margin-top": "-15px"}):
                                 def add_custom_target():
                                     global available_targets
                                     if custom_target.value:
                                         t = custom_target.value.upper().strip()
                                         if t not in available_targets:
                                             available_targets = available_targets + [t]
-                                            asset_a.set(t)  # Auto-select the new target
+                                            asset_a.set(t)
                                             save_current_settings()
                                         custom_target.set("")
                                 
-                                solara.InputText(label="Add Custom Target", value=custom_target, on_value=lambda _: None)
-                                solara.Button("Add", on_click=add_custom_target, icon_name="mdi-plus", classes=["mt-6"])
+                                solara.InputText(label="Add Custom Target", value=custom_target, on_value=lambda _: None, dense=True)
+                                solara.Button("Add", on_click=add_custom_target, icon_name="mdi-plus", classes=["ma-0"], outlined=True)
                             
+                            solara.HTML(tag="hr", style="margin: 5px 0")
+
                             solara.SelectMultiple(
                                 label="Proxy Portfolio (Assets)", 
                                 all_values=["MSTR", "COIN", "MARA", "RIOT", "ETH", "QQQ"], 
-                                values=proxy_assets
+                                values=proxy_assets,
+                                dense=True
                             )
                             
                             # Custom Ticker Entry
-                            with solara.Row(style={"align-items": "center", "margin-top": "-10px"}):
+                            with solara.Row(style={"align-items": "center", "margin-top": "-15px"}):
                                 def add_ticker():
                                     if custom_ticker.value:
                                         t = custom_ticker.value.upper().strip()
@@ -318,36 +357,36 @@ def Dashboard():
                                             proxy_assets.set(proxy_assets.value + [t])
                                         custom_ticker.set("")
                                 
-                                solara.InputText(label="Add Custom Ticker", value=custom_ticker, on_value=lambda _: None) # Controlled
-                                solara.Button("Add", on_click=add_ticker, icon_name="mdi-plus", classes=["mt-6"])
+                                solara.InputText(label="Add Custom Ticker", value=custom_ticker, on_value=lambda _: None, dense=True) 
+                                solara.Button("Add", on_click=add_ticker, icon_name="mdi-plus", classes=["ma-0"], outlined=True)
                             
                             # Custom Weights UI (If assets are selected)
                             if proxy_assets.value:
-                                with solara.Card("Weights (%)", style={"margin-top": "10px", "padding": "10px"}):
-                                    for asset in proxy_assets.value:
-                                        with solara.Row(style={"align-items": "center"}):
-                                            # Visibility Toggle
-                                            is_visible = asset in show_tickers.value
-                                            def toggle_v(v, a=asset):
-                                                if v: show_tickers.set(list(set(show_tickers.value + [a])))
-                                                else: show_tickers.set([x for x in show_tickers.value if x != a])
-                                            
-                                            solara.Checkbox(value=is_visible, on_value=toggle_v, style="flex: 0")
-                                            
-                                            # Weight Input
-                                            def set_w(v, a=asset):
-                                                new_weights = dict(proxy_weights.value)
-                                                new_weights[a] = v / 100.0 if v is not None else 0.0
-                                                proxy_weights.set(new_weights)
-                                            
-                                            current_val = int(proxy_weights.value.get(asset, 0) * 100)
-                                            solara.InputInt(label=f"{asset}", value=current_val, on_value=set_w, style="flex: 1")
-                                            
-                                    solara.Text("Weights sum must be <= 100%. Remainder is Cash.", style="font-size: 0.7em; color: gray")
-                            
+                                solara.Text("Weights (0-100%)", style={"font-size": "0.8em", "color": "gray", "margin-top": "5px"})
+                                with solara.Card(style={"padding": "5px"}):
+                                    with solara.Column(gap="4px"):
+                                        for asset in proxy_assets.value:
+                                            with solara.Row(style={"align-items": "center"}):
+                                                # Visibility Toggle
+                                                is_visible = asset in show_tickers.value
+                                                def toggle_v(v, a=asset):
+                                                    if v: show_tickers.set(list(set(show_tickers.value + [a])))
+                                                    else: show_tickers.set([x for x in show_tickers.value if x != a])
+                                                
+                                                solara.Checkbox(value=is_visible, on_value=toggle_v, style="flex: 0; margin-right: 5px")
+                                                
+                                                # Weight Input
+                                                def set_w(v, a=asset):
+                                                    new_weights = dict(proxy_weights.value)
+                                                    new_weights[a] = v / 100.0 if v is not None else 0.0
+                                                    proxy_weights.set(new_weights)
+                                                
+                                                current_val = int(proxy_weights.value.get(asset, 0) * 100)
+                                                solara.InputInt(label=f"{asset}", value=current_val, on_value=set_w, style="flex: 1", dense=True)
+
                             # Lookback Controls
                             with solara.Column(gap="10px", style={"margin-top": "10px"}):
-                                solara.Text("Lookback Period:", style={"font-weight": "bold", "font-size": "0.9em"})
+                                solara.Text("Lookback Period", style={"font-weight": "bold", "font-size": "0.9em"})
                                 
                                 # Toggle between Days and Start Date
                                 def on_toggle_start_date(v):
@@ -356,7 +395,9 @@ def Dashboard():
                                         lookback_start_date.set(None)
                                     else:
                                         import datetime as dt
-                                        lookback_start_date.set(dt.datetime.now() - dt.timedelta(days=100))
+                                        # Smart Default: Use current lookback window
+                                        days = lookback_window.value
+                                        lookback_start_date.set(dt.datetime.now() - dt.timedelta(days=days))
                                 
                                 solara.Checkbox(label="Use Start Date", value=use_start_date.value, on_value=on_toggle_start_date)
                                 
@@ -367,11 +408,12 @@ def Dashboard():
                                     solara.InputText(
                                         label="Start Date (YYYY-MM-DD)", 
                                         value=curr_date_val.strftime("%Y-%m-%d"),
-                                        on_value=lambda v: lookback_start_date.set(dt.datetime.strptime(v, "%Y-%m-%d"))
+                                        on_value=lambda v: lookback_start_date.set(dt.datetime.strptime(v, "%Y-%m-%d")),
+                                        dense=True
                                     )
                                 
                                 # Always show duration controls
-                                solara.InputInt(label="Duration (Days)", value=lookback_window)
+                                solara.InputInt(label="Duration (Days)", value=lookback_window, dense=True)
                                 solara.SliderInt(
                                     label="",
                                     value=lookback_window,
@@ -380,14 +422,16 @@ def Dashboard():
                                     thumb_label=True
                                 )
                             
-                            solara.Button(
-                                "Analyze Drift", 
-                                on_click=calculate_analytics,
-                                color="primary",
-                                icon_name="mdi-chart-line",
-                                loading=is_loading.value,
-                                style="width: 100%; margin-top: 10px"
-                            )
+                            with solara.Row(style={"margin-top": "10px", "align-items": "center"}):
+                                solara.Button(
+                                    "Analyze Drift", 
+                                    on_click=calculate_analytics,
+                                    color="primary",
+                                    icon_name="mdi-chart-line",
+                                    loading=is_loading.value,
+                                    style="flex: 1;"
+                                )
+                                solara.Button(icon_name="mdi-cog", on_click=lambda: show_settings.set(True), icon=True, outlined=True)
 
                     # Metrics
                     if calculation_result.value:
@@ -399,27 +443,11 @@ def Dashboard():
                             if res.get("loader_warning"):
                                 solara.Warning(res["loader_warning"])
                             
-                            corr = res["correlation"]
-                            vol_spread = res["vol_spread"]
-                            te = res["tracking_error"]
                             
-                            with solara.Column(gap="15px", style={"margin-top": "20px"}):
-                                with solara.Card("Correlation"):
-                                    color = "green" if corr > 0.8 else "orange" if corr > 0.5 else "red"
-                                    solara.Text(f"{corr:.4f}", style={"font-size": "26px", "font-weight": "bold", "color": color})
-                                
-                                with solara.Card("Tracking Error (Ann.)"):
-                                    te_color = "green" if te < 0.10 else "orange" if te < 0.20 else "red"
-                                    solara.Text(f"{te:.2%}", style={"font-size": "26px", "font-weight": "bold", "color": te_color})
-
-                                with solara.Card("Tracking Error (Period)"):
-                                    te_p = res["period_tracking_error"]
-                                    solara.Text(f"{te_p:.2%}", style={"font-size": "26px", "font-weight": "bold", "color": "#00d1b2"})
-
-                                with solara.Card("Vol. Spread"):
-                                    spread_color = "red" if vol_spread > 0.05 else "green" if vol_spread < 0.02 else "orange"
-                                    prefix = "+" if vol_spread > 0 else ""
-                                    solara.Text(f"{prefix}{vol_spread:.2%}", style={"font-size": "26px", "font-weight": "bold", "color": spread_color})    
+                            
+                            # Mobile Stats (Hidden on Desktop)
+                            with solara.Column(classes=["d-md-none"]):
+                                render_stats_table(res)    
 
                 # --- RIGHT COLUMN ---
                 with solara.Column(style={"flex": "1", "min-width": "0", "height": "100%"}):
@@ -474,8 +502,15 @@ def Dashboard():
                             legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
                         )
                         
-                        with solara.Card(style={"height": "100%"}):
-                            solara.FigurePlotly(fig)
+                        # Side-by-Side Layout for Desktop
+                        with solara.Row(style={"height": "100%", "gap": "0px"}):
+                             with solara.Card(style={"height": "100%", "flex": "1"}):
+                                 solara.FigurePlotly(fig)
+                             
+                             # Desktop Stats (Right Side)
+                             with solara.Column(classes=["d-none", "d-md-block"], style={"width": "320px", "min-width": "320px", "padding-left": "20px"}):
+                                  render_stats_table(res)
+
                     else:
                         if not calculation_result.value:
                              with solara.Card(style={"height": "400px", "display": "flex", "align-items": "center", "justify-content": "center"}):
