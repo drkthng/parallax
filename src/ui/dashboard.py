@@ -1,51 +1,100 @@
 
 import solara
 import polars as pl
-from typing import Optional
+from typing import Optional, List
 
 from src.data.factory import DataFactory
 from src.core.stats import CorrelationEngine
-# --- State ---
-asset_a = solara.reactive("Index")
-proxy_assets = solara.reactive(["MSTR"]) 
-proxy_weights = solara.reactive({}) # {symbol: weight_decimal}
+from src.utils.settings import get_settings_manager
+
+# --- Settings Manager ---
+_settings = get_settings_manager()
+_loaded_settings = _settings.load()
+
+# --- State (initialized from saved settings) ---
+asset_a = solara.reactive(_loaded_settings.get("asset_a", "Index"))
+proxy_assets = solara.reactive(_loaded_settings.get("proxy_assets", ["MSTR"]))
+proxy_weights = solara.reactive(_loaded_settings.get("proxy_weights", {}))
+show_tickers = solara.reactive(_loaded_settings.get("show_tickers", []))
 
 # Configuration State
-lookback_window = solara.reactive(100)
-# Start date overrides lookback_window if set
-lookback_start_date = solara.reactive(None) 
-# Default max is 1 year, user can extend via settings
-max_lookback_range = solara.reactive(365) 
-data_source = solara.reactive("Mock")
+lookback_window = solara.reactive(_loaded_settings.get("lookback_window", 100))
+lookback_start_date = solara.reactive(None)  # Not persisted (datetime is complex)
+max_lookback_range = solara.reactive(_loaded_settings.get("max_lookback_range", 365))
+data_source = solara.reactive(_loaded_settings.get("data_source", "Mock"))
+source_overrides = solara.reactive(_loaded_settings.get("source_overrides", {})) # {symbol: source}
+persist_settings = solara.reactive(_loaded_settings.get("persist_settings", False))
+
+# Available target options (can be extended by user)
+available_targets: List[str] = _loaded_settings.get("available_targets", ["Index", "BTC", "SPY", "NDX", "GLD"])
 
 # UI State
 show_settings = solara.reactive(False)
 calculation_result = solara.reactive(None)
 is_loading = solara.reactive(False)
 
+
+def save_current_settings():
+    """Save all current settings to disk if persistence is enabled."""
+    if persist_settings.value:
+        _settings.save({
+            "asset_a": asset_a.value,
+            "proxy_assets": proxy_assets.value,
+            "proxy_weights": proxy_weights.value,
+            "show_tickers": show_tickers.value,
+            "lookback_window": lookback_window.value,
+            "max_lookback_range": max_lookback_range.value,
+            "data_source": data_source.value,
+            "persist_settings": persist_settings.value,
+            "available_targets": available_targets,
+            "source_overrides": source_overrides.value,
+        })
+
+def resolve_loader(symbol: str) -> tuple:
+    """Get loader for a specific symbol based on overrides or default."""
+    source = source_overrides.value.get(symbol, data_source.value)
+    return DataFactory.get_loader_safe(source)
+
 def calculate_analytics():
     """Triggered by the UI to perform analysis."""
     is_loading.set(True)
     try:
-        # factory.get_loader might raise ImportError for Norgate, handled here
-        loader = DataFactory.get_loader(data_source.value)
+
         n = lookback_window.value
         s_date = lookback_start_date.value
         
+        warnings_list = []
+        
         # 1. Load TARGET Data
-        df_target = loader.load_price_history(asset_a.value, n_days=n, start_date=s_date)
+        loader_target, warn_target = resolve_loader(asset_a.value)
+        if warn_target:
+            warnings_list.append(f"Target ({asset_a.value}): {warn_target}")
+            
+        df_target = loader_target.load_price_history(asset_a.value, n_days=n, start_date=s_date)
+        if df_target.is_empty():
+            raise ValueError(f"No data returned for target: {asset_a.value}")
+            
         df_target = df_target.rename({"close": "close_target"})
         
-        # 2. Load PROXY Data (Multi-Asset)
+        # 2. Load PROXY Portfolio Data
         if not proxy_assets.value:
             raise ValueError("Please select at least one asset for the Proxy Portfolio.")
             
         proxy_dfs = []
         for asset in proxy_assets.value:
-            df = loader.load_price_history(asset, n_days=n, start_date=s_date)
-            # Rename close col to avoid collision (e.g. "close_MSTR")
-            df = df.rename({"close": f"close_{asset}"})
-            proxy_dfs.append(df)
+            loader_p, warn_p = resolve_loader(asset)
+            if warn_p:
+                warnings_list.append(f"Proxy ({asset}): {warn_p}")
+                
+            try:
+                df = loader_p.load_price_history(asset, n_days=n, start_date=s_date)
+                if not df.is_empty():
+                    df = df.rename({"close": f"close_{asset}"})
+                    proxy_dfs.append(df)
+            except Exception as e:
+                warnings_list.append(f"Failed to load {asset}: {e}")
+        
+        loader_warning = "; ".join(warnings_list) if warnings_list else None
         
         # 3. Join All Data
         combined = df_target
@@ -59,25 +108,20 @@ def calculate_analytics():
             for c in price_cols
         ]).drop_nulls()
         
-        # 5. Synthesize Proxy Return (Custom Weights)
-        # If weights are provided, use them. Otherwise, default to equal weight.
+        # 5. Synthesize Proxy Return (Cash-Weighted)
         weights_map = proxy_weights.value or {}
-        proxy_ret_cols = [f"ret_{a}" for a in proxy_assets.value]
         
-        # Ensure all selected assets have a weight defined, or default to 1/N
-        final_weights = {}
-        total_weight_input = sum(weights_map.values()) if weights_map else 0
+        # Validate Total Weight
+        total_weight_input = sum(weights_map.get(a, 0.0) for a in proxy_assets.value)
         
-        if total_weight_input > 0:
-            # Normalize user weights to sum to 1.0
-            for a in proxy_assets.value:
-                final_weights[a] = weights_map.get(a, 0.0) / total_weight_input
-        else:
-            # Fallback to equal weight
-            n_assets = len(proxy_assets.value)
-            for a in proxy_assets.value:
-                final_weights[a] = 1.0 / n_assets
-                
+        if total_weight_input > 1.0001: # Small epsilon for float
+            raise ValueError(f"Total weights ({total_weight_input:.1%}) exceed 100%. Please reduce them.")
+            
+        # Any weight < 100% is Cash (0% return)
+        # Rp = Sum(W_i * R_i) + (1 - Sum(W_i)) * 0
+        final_weights = {a: weights_map.get(a, 0.0) for a in proxy_assets.value}
+        cash_weight = 1.0 - total_weight_input
+        
         # Weighted Return: Sum(W_i * R_i)
         combined = combined.with_columns(
             pl.sum_horizontal([
@@ -86,15 +130,20 @@ def calculate_analytics():
             ]).alias("ret_proxy_synthetic")
         )
         
-        # 6. Reconstruct Proxy Price (Base 100)
+        # 6. Reconstruct Prices (Base 100)
+        # Synthetic Proxy
         combined = combined.with_columns(
              (100 * (1 + pl.col("ret_proxy_synthetic")).cum_prod()).alias("close_proxy_synthetic")
         )
-
-        # Also rebase Target to 100
+        # Target
         combined = combined.with_columns(
              (100 * (1 + pl.col("ret_target")).cum_prod()).alias("close_target_rebased")
         )
+        # Individual Tickers (for optional visualization)
+        for a in proxy_assets.value:
+             combined = combined.with_columns(
+                  (100 * (1 + pl.col(f"ret_{a}")).cum_prod()).alias(f"close_{a}_rebased")
+             )
 
         # --- Statistics Engine ---
         corr = CorrelationEngine.calculate_correlation(
@@ -115,7 +164,9 @@ def calculate_analytics():
             "vol_spread": vol_spread,
             "tracking_error": te,
             "data": combined,
-            "weights": final_weights
+            "weights": final_weights,
+            "cash_weight": cash_weight,
+            "loader_warning": loader_warning  # Will be None if no fallback occurred
         }
         calculation_result.set(results)
         
@@ -127,7 +178,13 @@ def calculate_analytics():
 
 @solara.component
 def Dashboard():
-    
+    # --- Hooks (Must be at top level) ---
+    custom_ticker = solara.use_reactive("")
+    use_start_date = solara.use_reactive(lookback_start_date.value is not None)
+    custom_target = solara.use_reactive("")  # Moved to top level to avoid conditional hook error
+    new_override_symbol = solara.use_reactive("")
+    new_override_source = solara.use_reactive("Yahoo")
+
     # --- View Switching ---
     if show_settings.value:
         # SETTINGS VIEW
@@ -137,9 +194,46 @@ def Dashboard():
                     solara.Text("Data Source configuration is global.", style={"font-style": "italic"})
                     solara.Select(
                         label="Data Source",
-                        values=["Mock", "Norgate", "CSV"],
+                        values=["Mock", "Norgate", "CSV", "Yahoo"],
                         value=data_source
                     )
+                    
+                    # Data Source Routing
+                    with solara.Card("Data Source Routing"):
+                        solara.Text("Override the default data source for specific assets.", style={"font-size": "0.9em", "color": "gray", "margin-bottom": "15px"})
+                        
+                        # List Rules
+                        with solara.Column(gap="5px"):
+                            if not source_overrides.value:
+                                solara.Text("No overrides defined.", style={"font-style": "italic", "color": "gray"})
+                            else:
+                                for sym, src in list(source_overrides.value.items()):
+                                    with solara.Row(style={"align-items": "center"}):
+                                        solara.Text(f"**{sym}** → {src}")
+                                        def make_delete_handler(s):
+                                            return lambda: source_overrides.set({k: v for k, v in source_overrides.value.items() if k != s})
+                                        
+                                        solara.Button(icon_name="mdi-delete", on_click=make_delete_handler(sym), icon=True, outlined=True, classes=["ma-0"])
+                        
+                        # Add Rule
+                        solara.HTML(tag="hr", style="margin: 15px 0")
+                        # hooks moved to top level
+                        
+                        with solara.Row(style={"align-items": "end"}):
+                            solara.InputText(label="Symbol (e.g. BTC-USD)", value=new_override_symbol)
+                            solara.Select(label="Source", values=["Yahoo", "Norgate", "Mock"], value=new_override_source)
+                            
+                            def add_override():
+                                if new_override_symbol.value:
+                                    s = new_override_symbol.value.upper().strip()
+                                    new_map = source_overrides.value.copy()
+                                    new_map[s] = new_override_source.value
+                                    source_overrides.set(new_map)
+                                    new_override_symbol.set("")
+                                    if persist_settings.value:
+                                        save_current_settings()
+                            
+                            solara.Button("Add Rule", on_click=add_override, color="primary")
                     
                     solara.Select(
                         label="Max Lookback Range (Days)",
@@ -147,7 +241,30 @@ def Dashboard():
                         value=max_lookback_range
                     )
                     
-                    solara.Button("Save & Return", on_click=lambda: show_settings.set(False), color="primary", size="large")
+                    # Persistence Toggle
+                    with solara.Card("Session Persistence", style={"margin-top": "10px"}):
+                        def on_persist_toggle(value):
+                            persist_settings.set(value)
+                            if value:
+                                save_current_settings()
+                            else:
+                                _settings.clear()
+                        
+                        solara.Switch(
+                            label="Remember Settings",
+                            value=persist_settings.value,
+                            on_value=on_persist_toggle
+                        )
+                        solara.Text(
+                            "When enabled, your configuration will be saved and restored on next startup.",
+                            style={"font-size": "0.8em", "color": "gray"}
+                        )
+                    
+                    def save_and_return():
+                        save_current_settings()
+                        show_settings.set(False)
+                    
+                    solara.Button("Save & Return", on_click=save_and_return, color="primary", size="large")
 
     else:
         # DASHBOARD VIEW
@@ -161,11 +278,28 @@ def Dashboard():
                     # Controls Card
                     with solara.Card("Configuration"):
                         with solara.Column(gap="15px"):
+                            # Target Selection with Custom Entry
                             solara.Select(
                                 label="Target (Underlying)", 
-                                values=["Index", "BTC", "SPY", "NDX", "GLD"], 
+                                values=available_targets, 
                                 value=asset_a
                             )
+                            
+                            # Custom Target Entry
+                            # custom_target hook moved to top level
+                            with solara.Row(style={"align-items": "center", "margin-top": "-10px"}):
+                                def add_custom_target():
+                                    global available_targets
+                                    if custom_target.value:
+                                        t = custom_target.value.upper().strip()
+                                        if t not in available_targets:
+                                            available_targets = available_targets + [t]
+                                            asset_a.set(t)  # Auto-select the new target
+                                            save_current_settings()
+                                        custom_target.set("")
+                                
+                                solara.InputText(label="Add Custom Target", value=custom_target, on_value=lambda _: None)
+                                solara.Button("Add", on_click=add_custom_target, icon_name="mdi-plus", classes=["mt-6"])
                             
                             solara.SelectMultiple(
                                 label="Proxy Portfolio (Assets)", 
@@ -175,7 +309,6 @@ def Dashboard():
                             
                             # Custom Ticker Entry
                             with solara.Row(style={"align-items": "center", "margin-top": "-10px"}):
-                                custom_ticker = solara.use_reactive("")
                                 def add_ticker():
                                     if custom_ticker.value:
                                         t = custom_ticker.value.upper().strip()
@@ -190,22 +323,31 @@ def Dashboard():
                             if proxy_assets.value:
                                 with solara.Card("Weights (%)", style={"margin-top": "10px", "padding": "10px"}):
                                     for asset in proxy_assets.value:
-                                        def set_w(v, a=asset):
-                                            new_weights = dict(proxy_weights.value)
-                                            new_weights[a] = v / 100.0 if v is not None else 0.0
-                                            proxy_weights.set(new_weights)
-                                        
-                                        current_val = int(proxy_weights.value.get(asset, 0) * 100)
-                                        solara.InputInt(label=f"{asset}", value=current_val, on_value=set_w)
-                                    solara.Text("Weights will be auto-normalized to 100%.", style={"font-size": "0.7em", "color": "gray"})
+                                        with solara.Row(style={"align-items": "center"}):
+                                            # Visibility Toggle
+                                            is_visible = asset in show_tickers.value
+                                            def toggle_v(v, a=asset):
+                                                if v: show_tickers.set(list(set(show_tickers.value + [a])))
+                                                else: show_tickers.set([x for x in show_tickers.value if x != a])
+                                            
+                                            solara.Checkbox(value=is_visible, on_value=toggle_v, style="flex: 0")
+                                            
+                                            # Weight Input
+                                            def set_w(v, a=asset):
+                                                new_weights = dict(proxy_weights.value)
+                                                new_weights[a] = v / 100.0 if v is not None else 0.0
+                                                proxy_weights.set(new_weights)
+                                            
+                                            current_val = int(proxy_weights.value.get(asset, 0) * 100)
+                                            solara.InputInt(label=f"{asset}", value=current_val, on_value=set_w, style="flex: 1")
+                                            
+                                    solara.Text("Weights sum must be <= 100%. Remainder is Cash.", style="font-size: 0.7em; color: gray")
                             
                             # Lookback Controls
                             with solara.Column(gap="10px", style={"margin-top": "10px"}):
                                 solara.Text("Lookback Period:", style={"font-weight": "bold", "font-size": "0.9em"})
                                 
                                 # Toggle between Days and Start Date
-                                use_start_date = solara.use_reactive(lookback_start_date.value is not None)
-                                
                                 def on_toggle_start_date(v):
                                     use_start_date.set(v)
                                     if not v:
@@ -242,7 +384,7 @@ def Dashboard():
                                 color="primary",
                                 icon_name="mdi-chart-line",
                                 loading=is_loading.value,
-                                style={"width": "100%", "margin-top": "10px"}
+                                style="width: 100%; margin-top: 10px"
                             )
 
                     # Metrics
@@ -251,6 +393,10 @@ def Dashboard():
                         if "error" in res:
                             solara.Error(res["error"])
                         else:
+                            # Show loader warning if fallback occurred
+                            if res.get("loader_warning"):
+                                solara.Warning(res["loader_warning"])
+                            
                             corr = res["correlation"]
                             vol_spread = res["vol_spread"]
                             te = res["tracking_error"]
@@ -296,8 +442,21 @@ def Dashboard():
                             y=data["close_proxy_synthetic"].to_list(),
                             mode='lines',
                             name=proxy_label,
-                            line=dict(color='#00d1b2', width=2)
+                            line=dict(color='#00d1b2', width=3)
                         ))
+                        
+                        # Individual Tickers
+                        for asset in show_tickers.value:
+                            col_name = f"close_{asset}_rebased"
+                            if col_name in data.columns:
+                                fig.add_trace(go.Scatter(
+                                    x=data["date"].to_list(),
+                                    y=data[col_name].to_list(),
+                                    mode='lines',
+                                    name=f"{asset}",
+                                    line=dict(width=1, dash='dot'),
+                                    opacity=0.6
+                                ))
                         
                         fig.update_layout(
                             title=f"Performance Comparison",

@@ -16,9 +16,14 @@
 - **Cause:** Polars releases the GIL, but Flet's `on_click` is synchronous.
 - **Solution:** We implemented `run_in_background` decorator in `src/utils/async_tools.py`. USE IT for all button clicks.
 
-### [Solved] Norgate Mocking
-- **Problem:** Agent tried to import `norgatedata` library which isn't installed in CI/CD.
-- **Solution:** Use `MockLoader` interface in `src/data/loader.py` for all dev environments. Only load real drivers if `os.getenv("LIVE_TRADING")` is True.
+### [Solved] Norgate Data Integration
+- **Problem:** Norgate Data SDK import failed when not installed or when Norgate Data Updater is not running.
+- **Solution:** 
+  1. `NorgateLoader` now checks both SDK availability AND database connection status.
+  2. `DataFactory.get_loader_safe()` provides graceful fallback to `MockLoader` with warning message.
+  3. Symbol mapping in `NorgateLoader` translates common aliases (e.g., "Index" → "$SPX").
+  4. Dashboard displays warning when fallback occurs (orange warning banner).
+- **Usage:** Install `norgatedata` via pip. Ensure Norgate Data Updater is running for live data.
 
 ### [Solved] Plotly Memory Leak
 - **Problem:** Re-creating `ft.PlotlyChart` controls caused RAM spikes.
@@ -86,3 +91,10 @@
 - **Problem:** `git add . & git commit` fails in PowerShell.
 - **Cause:** `&` is a Call Operator in PowerShell, not a command separator like in Bash (`&&` or `;`).
 - **Solution:** Execute commands sequentially as separate tool calls, or use `;` if absolutely necessary (but separate calls are safer).
+
+### [Solved] Settings Persistence
+- **Problem:** User configuration (data source, assets, weights) was lost on restart.
+- **Solution:** Implemented `src/utils/settings.py` (JSON-based).
+- **Mechanism:** `SettingsManager` loads/saves to `data/settings.json`.
+- **Usage:** Toggle "Remember Settings" in the UI to enable auto-save.
+- **Invariant:** `asset_a` (Target) is now dynamic and stored in settings, allowing custom tickers.

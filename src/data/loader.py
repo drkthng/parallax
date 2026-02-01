@@ -34,51 +34,55 @@ class MockLoader(MarketDataLoader):
         start_date: Optional[datetime] = None
     ) -> pl.DataFrame:
         """
-        Generates random walk data.
-        
-        Args:
-            symbol (str): Ticker symbol.
-            n_days (int): Number of days to generate (used if start_date is None).
-            start_date (datetime, optional): If provided, calculates days from then until now.
+        Generates deterministic random walk data anchored to dates.
         """
-        # Use symbol-dependent seed for deterministic but diverse data
-        # Hash might vary per session, so we use a stable hash if needed, but hash() is fine for mock
-        seed_val = abs(hash(symbol)) % (2**32 - 1)
-        rng = np.random.default_rng(seed_val)
+        # Determine the constant epoch for our mock history (e.g., 5 years ago)
+        anchor_date = (datetime.now() - timedelta(days=365*5)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end_boundary = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         
         if start_date:
             actual_start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
-            # User wants n_days TO START from start_date
-            # But we must cap it at NOW to avoid future data
-            end_boundary = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            # Duration is n_days but capped at now
             target_end = actual_start_date + timedelta(days=n_days)
-            
             if target_end > end_boundary:
-                # Truncate n_days to reality
-                delta = end_boundary - actual_start_date
-                actual_n_days = max(1, delta.days)
-            else:
-                actual_n_days = n_days
+                target_end = end_boundary
         else:
-            # Traditional lookback from NOW
-            end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            actual_n_days = n_days
-            actual_start_date = end_date - timedelta(days=n_days)
+            # Traditional lookback: n_days ending today
+            actual_start_date = end_boundary - timedelta(days=n_days)
+            target_end = end_boundary
 
-        dates = [actual_start_date + timedelta(days=i) for i in range(actual_n_days)]
+        # To make it feel like one continuous history:
+        # We calculate the returns for every day from anchor_date to target_end.
+        # BUT to be efficient, we only need to seed for the dates we actually want.
+        # However, a random walk P_t = P_0 * exp(sum(r_i)) needs all preceding returns.
         
-        # Random walk: starting at 100, daily returns ~ N(0, 0.015)
-        # Increase volatility slightly for more interesting plots
-        returns = rng.normal(0, 0.015, actual_n_days)
-        prices = 100 * np.exp(np.cumsum(returns))
+        total_days_since_anchor = (target_end - anchor_date).days
+        start_offset = (actual_start_date - anchor_date).days
         
-        df = pl.DataFrame({
-            "date": dates,
-            "close": prices
+        # Base seed for the symbol
+        symbol_seed = abs(hash(symbol)) % (2**31)
+        
+        # Generate returns from anchor to end
+        # (For large datasets we'd use a different approach, but for 100-3650 days this is fine)
+        full_rng = np.random.default_rng(symbol_seed)
+        all_returns = full_rng.normal(0, 0.015, max(1, total_days_since_anchor))
+        
+        # Calculate cumulative price from anchor (Base 100)
+        prices = 100 * np.exp(np.cumsum(all_returns))
+        
+        # Slice the requested window
+        requested_count = (target_end - actual_start_date).days
+        if requested_count <= 0:
+            # Fallback for edge cases
+            return pl.DataFrame({"date": [actual_start_date], "close": [100.0]})
+            
+        view_prices = prices[start_offset : start_offset + requested_count]
+        view_dates = [actual_start_date + timedelta(days=i) for i in range(len(view_prices))]
+        
+        return pl.DataFrame({
+            "date": view_dates,
+            "close": view_prices
         })
-        
-        # Ensure correct column order and types as per interface requirements
-        return df.select(["date", "close"])
 
 class CsvLoader(MarketDataLoader):
     """Loads market data from CSV files in a 'data/csv/' directory."""
@@ -154,20 +158,54 @@ class CsvLoader(MarketDataLoader):
 class NorgateLoader(MarketDataLoader):
     """Loads market data using the Norgate Data Python SDK."""
     
+    _norgate_available: bool = False
+    
     def __init__(self):
         try:
             import norgatedata
             self.nd = norgatedata
+            
+            # Check if the Norgate Data Updater is running and database is accessible
+            if not self.nd.status():
+                raise ConnectionError(
+                    "Norgate Data Updater is not running or database is inaccessible. "
+                    "Please start the Norgate Data Updater application."
+                )
+            NorgateLoader._norgate_available = True
+            
         except ImportError:
+            NorgateLoader._norgate_available = False
             raise ImportError("Norgate Data SDK not found. Please install 'norgatedata' or use another data source.")
+    
+    @classmethod
+    def is_available(cls) -> bool:
+        """Check if Norgate Data SDK is available and connected."""
+        try:
+            import norgatedata
+            return norgatedata.status()
+        except ImportError:
+            return False
+        except Exception:
+            return False
 
-    def load_price_history(self, symbol: str, n_days: int = 100) -> pl.DataFrame:
+    def load_price_history(
+        self, 
+        symbol: str, 
+        n_days: int = 100, 
+        start_date: Optional[datetime] = None
+    ) -> pl.DataFrame:
         if not hasattr(self, 'nd'):
-             raise ImportError("Norgate Data SDK not initialized.")
-             
-        # Map generic symbols to Norgate symbols if needed
-        # e.g. "BTC" -> "BTCUSD" might be needed depending on the database
-        # For now, we assume user passes valid Norgate symbols (e.g. '$SPX', 'AAPL')
+            raise ImportError("Norgate Data SDK not initialized.")
+        
+        # Symbol mapping for common aliases
+        symbol_map = {
+            "Index": "$SPX",  # S&P 500 Index
+            "BTC": "BTC-USD",  # Bitcoin
+            "SPY": "SPY",
+            "NDX": "$NDX",
+            "GLD": "GLD",
+        }
+        norgate_symbol = symbol_map.get(symbol, symbol)
         
         if start_date:
             actual_start_date = start_date
@@ -181,22 +219,20 @@ class NorgateLoader(MarketDataLoader):
         try:
             # Use PriceAdjustmentType.TotalReturn (includes dividends/splits)
             timeseries = self.nd.price_timeseries(
-                symbol,
+                norgate_symbol,
                 start_date=actual_start_date,
                 end_date=actual_end_date,
                 stock_price_adjustment_setting=self.nd.StockPriceAdjustmentType.TOTALRETURN,
                 padding_setting=self.nd.PaddingType.NONE
             )
             
-            if timeseries is None:
-                raise ValueError(f"No data found for symbol '{symbol}' in Norgate Data.")
-                
+            if timeseries is None or len(timeseries) == 0:
+                raise ValueError(f"No data found for symbol '{symbol}' (Norgate: '{norgate_symbol}'). Check if symbol exists in your Norgate subscription.")
+            
             # Convert numpy structured array to Polars DataFrame
-            # Norgate struct fields: 'Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Turnover', 'Unadjusted Close'
             df = pl.from_numpy(timeseries)
             
-            # Rename and Cast
-            # Norgate dates are usually numpy datetime64[ns]
+            # Rename columns to our standard format
             df = df.rename({"Date": "date", "Close": "close"})
             
             # Ensure proper datetime type
@@ -204,5 +240,11 @@ class NorgateLoader(MarketDataLoader):
             
             return df.select(["date", "close"])
             
+        except ValueError:
+            # Norgate SDK raises empty ValueError when symbol is not found
+            raise ValueError(f"Symbol '{norgate_symbol}' not found in Norgate Data. Please check your subscription and symbol spelling.")
         except Exception as e:
-             raise RuntimeError(f"Norgate Load Error for {symbol}: {str(e)}")
+            msg = str(e)
+            if not msg:
+                msg = f"{type(e).__name__} (No error message provided by SDK)"
+            raise RuntimeError(f"Norgate Load Error for {symbol} ({norgate_symbol}): {msg}")

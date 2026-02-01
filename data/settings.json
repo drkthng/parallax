@@ -1,0 +1,27 @@
+{
+  "asset_a": "BTC-USD",
+  "proxy_assets": [
+    "MSTR"
+  ],
+  "proxy_weights": {
+    "MSTR": 1.0
+  },
+  "show_tickers": [
+    "MSTR"
+  ],
+  "lookback_window": 100,
+  "max_lookback_range": 365,
+  "data_source": "Norgate",
+  "persist_settings": true,
+  "available_targets": [
+    "Index",
+    "BTC",
+    "SPY",
+    "NDX",
+    "GLD",
+    "BTC-USD"
+  ],
+  "source_overrides": {
+    "BTC-USD": "Yahoo"
+  }
+}
