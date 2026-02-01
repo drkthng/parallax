@@ -1,49 +1,64 @@
-# Parallax
-
+# PARALLAX // DRIFT ANALYZER
 > **"Synthesize the Underlying. Minimize the Drift."**
 
-### The Concept
-In astronomy, **Parallax** is the displacement or difference in the apparent position of an object viewed along two different lines of sight.
+---
 
-In quantitative finance, we face a similar phenomenon:
-1.  **The Object:** The True Price (e.g., The Bitcoin Index).
-2.  **Observer A:** The Direct Underlying (The Index itself).
-3.  **Observer B:** The Proxy Portfolio (e.g., MSTR + COIN).
+## 1. THE MISSION
+**Parallax** is a high-precision tool for constructing synthetic assets. It measures the "drift"—the tracking error between a target asset (e.g., BTC) and a basket of proxies (e.g., MSTR, COIN). 
 
-The difference between these two views is **Tracking Error** (Drift).
+**NO FLUFF. PURE MATH. REACTIVE SPEED.**
 
-**Parallax** is a desktop tool built to measure, visualize, and minimize this displacement. It allows traders to construct synthetic proxies for assets they cannot trade directly, optimizing the weighting of available equities to create a "perfect" mirror of the target.
+---
 
-### The Stack (2026 Edition)
-We prioritize local performance, strict typing, and browser-based reactivity.
+## 2. THE ARSENAL (FEATURES)
 
-*   **GUI:** [Solara](https://solara.dev) - React-based Python web framework.
-*   **Data Engine:** [Polars](https://pola.rs) - Rust-based DataFrame library. Replaces Pandas for speed and strict schema enforcement.
-*   **Math:** `scipy.optimize` (SLSQP/Minimize) for solving weight allocations.
-*   **Environment:** Windows (Native Executable via Browser App Mode).
+### [A] DATA NEXUS
+**Polars-Powered Engine.**
+Ingests historical price data with zero latency. Agnostic to source (Norgate, CSV, Parquet).
+*Strict Schema Enforcement.*
 
-### Features (v2.1)
-*   **Drift Dashboard:** Interactive Plotly charts comparing Target vs Proxy assets.
-*   **Advanced Analytics:** Real-time correlation, volatility spread, and tracking error metrics.
-*   **Dynamic Timeframes:** Adjustable lookback window (30-365 days) with real-time data generation.
-*   **Responsive Design:** Optimized grid layout for desktop usage.
+### [B] THE MIXER
+**Reactive Weighting.**
+Adjust proxy allocations in real-time. The Solara-based interface recalculates composite performance instantly as you drag sliders.
+*No "Refresh" Buttons. Just Flow.*
 
-### Architecture
-*   `src/core`: Pure logic and math. 100% covered by `pytest`.
-*   `src/data`: Interface adapters for Norgate Data and CSV ingestion.
-*   `src/app.py`: Main Solara application entry point.
+### [C] DRIFT ANALYSIS
+**Visual Truth.**
+Interactive Plotly surfaces reveal the deviation over time.
+- **Correlation Heatmaps:** See where your proxies align.
+- **Drift Cone:** Visualize the cumulative tracking error.
 
-### Usage
+---
 
-**1. One-Time Setup**
-Initialize the environment and install dependencies.
-```powershell
-.\setup.bat
-```
+## 3. DEPLOYMENT (WINDOWS)
 
-**2. Launch Application**
-Start the Solara server and open the application window.
-```powershell
-.\run_parallax.bat
-```
-*Note: The launcher minimizes the server console to the system tray and ensures a single browser window opens.*
+### THE "ONE-CLICK" LAUNCH
+We don't ship a bloated `.exe`. We ship a **Launcher**.
+
+1. **Install Python:** Ensure Python 3.10+ is installed.
+2. **Run `setup.bat`:** (First time only) This builds the `.venv` and installs dependencies.
+3. **Double-Click `run_parallax.bat`:**
+   - Activates the environment.
+   - Kills zombie processes.
+   - Launches in **NATIVE APP MODE** (Edge/Chrome).
+
+> **PRO TIP:** Right-click `run_parallax.bat` -> **Send to Desktop (create shortcut)**. Then right-click the shortcut -> **Properties** -> **Change Icon** to customize your dock.
+
+---
+
+## 4. OPERATIONAL GUIDE (3 STEPS)
+
+### STEP 1: LOAD
+Select your **Target Asset** (e.g., BTC) and your **Proxy Candidates** (e.g., MSTR, CLSK). The Data Nexus will align timestamps automatically.
+
+### STEP 2: MIX
+Use the connection sliders to assign weights.
+*Example: 50% MSTR + 50% CLSK.*
+
+### STEP 3: ANALYZE
+Watch the **Drift Chart**. Minimize the spread.
+- **Low Drift:** High fidelity synthesis.
+- **High Friction:** Market inefficiencies or poor proxy selection.
+
+---
+*Built with Polars & Solara. 2026.*

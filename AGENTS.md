@@ -98,3 +98,43 @@
 - **Mechanism:** `SettingsManager` loads/saves to `data/settings.json`.
 - **Usage:** Toggle "Remember Settings" in the UI to enable auto-save.
 - **Invariant:** `asset_a` (Target) is now dynamic and stored in settings, allowing custom tickers.
+
+## 5. Final Project Summary (Synthesis)
+
+### The Great Pivot: Flet to Solara
+- **The "Build Hell":** We started with Flet to build a native .EXE. It was a disaster. Packaging complications (`flet pack`), DLL missing errors, and the "White Screen of Death" plagued development.
+- **The Solution:** We realized the browser *is* the best runtime. Solara allows us to write pure Python (no JS required) and deploy as a web app.
+- **Native Feel:** By using the browser's `--app` flag (in `run_parallax.bat`), we strip the address bar and navigation controls, giving the user a native-like windowed experience without the compilation nightmare.
+
+### The Stack: Why This Won
+- **Polars Supremacy:** We rejected Pandas. Polars gives us speed, lazy evaluation, and strict schema enforcement.
+  - *Quirk:* Scalars are `Expr` objects. We learned to use `.item()` to extract raw floats for the UI/Math.
+- **Solara State:** `solara.reactive` provided the "glue" between our heavy Quant logic (Drift/Correlation) and the UI. It eliminated the complex event loops we fought in Flet.
+- **Launcher Magic:** The `run_parallax.bat` is the unsung hero. It handles environment activation, port conflict resolution (stopping zombies), and the native-app launch sequence in one double-click.
+
+## 6. Technical Appendix: Solara Pattern Library (Latest Fixes)
+
+### [Solved] Solara Watermark Removal (The "Atom Bomb" Method)
+- **Problem:** "This website runs on Solara" footer persisted despite standard CSS fixes.
+- **Cause:** Solara/Vuetify dynamically renders this element, sometimes bypassing static CSS or overriding it.
+- **Solution:** A 3-pronged approach is required:
+  1. **Settings API:** Set `solara.server.settings.theme.show_banner = False`.
+  2. **Environment:** Set `SOLARA_THEME_SHOW_BANNER=False` in the launcher.
+  3. **DOM Hunter:** Inject a JS script that aggressively polls for the specific text and hides the element.
+
+### [Solved] Responsive Layouts in Solara
+- **Problem:** Need different layouts for Desktop (Side-by-Side) vs. Mobile (Sidebar) without complex media queries.
+- **Solution:** Use **Vue/Vuetify classes** directly on `solara.Column`.
+  - Mobile: `classes=["d-md-none"]` (Hidden on Medium+ screens).
+  - Desktop: `classes=["d-none", "d-md-block"]` (Hidden on Small, Block on Medium+).
+  - Define a reusable renderer function (e.g., `render_stats_table`) to call in both branches.
+
+### [Solved] "Busy Button" State Lock
+- **Problem:** Buttons relying on async actions stayed "Loading" forever if an exception occurred.
+- **Solution:** ALWAYS use a `finally` block to reset the loading reactive variable (`is_loading.set(False)`). Pure `except` blocks are insufficient if the error handling itself crashes or returns early.
+
+### [Solved] Mixed Data Sources (Routing)
+- **Problem:** User needed some assets from Yahoo and others from Norgate in the same portfolio.
+- **Solution:** Implemented `source_overrides = solara.reactive({})`.
+  - Default: `data_source` (Global).
+  - Function: `resolve_loader(symbol)` checks the override map first, then falls back to global.
